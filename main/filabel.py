@@ -79,27 +79,25 @@ class StartApp:
         #     print(label)
         # print(reposlugs)
 
-    @click.command()
-    @click.option('-s', '--state', default='open', metavar='[open|closed|all]', help='Filter pulls by state.  [default: open]')
-    @click.option('-d/-D', '--delete-old/--no-delete-old', metavar='', help='Delete labels that do not match anymore. [default: True]')
-    @click.option('-b', '--base', metavar='BRANCH', help='Filter pulls by base (PR target) branch name.')
-    @click.option('-a', '--config-auth', metavar='FILENAME', help='File with authorization configuration.')
-    @click.option('-l', '--config-labels', metavar='FILENAME', help='File with labels configuration.')
-    @click.argument('reposlugs', metavar='[REPOSLUGS]...', nargs=-1, required=True)
-    def command_line(self, state, delete_old, base, config_auth, config_labels, reposlugs):
-        """CLI tool for filename-pattern-based labeling of GitHub PRs"""
-        self.validation(state, base, config_auth, config_labels, reposlugs)
-        # print(state)
-        # print(delete_old)
-        # print(base)
-        # print(config_auth)
-        # print(config_labels)
-        # print(reposlugs)
 
-    def run(self):
-        self.command_line()
-        self.send_requests()
+@click.command()
+@click.option('-s', '--state', default='open', metavar='[open|closed|all]', help='Filter pulls by state.  [default: open]')
+@click.option('-d/-D', '--delete-old/--no-delete-old', metavar='', help='Delete labels that do not match anymore. [default: True]')
+@click.option('-b', '--base', metavar='BRANCH', help='Filter pulls by base (PR target) branch name.')
+@click.option('-a', '--config-auth', metavar='FILENAME', help='File with authorization configuration.')
+@click.option('-l', '--config-labels', metavar='FILENAME', help='File with labels configuration.')
+@click.argument('reposlugs', metavar='[REPOSLUGS]...', nargs=-1, required=True)
+def command_line(state, delete_old, base, config_auth, config_labels, reposlugs):
+    """CLI tool for filename-pattern-based labeling of GitHub PRs"""
+    start = StartApp()
+    start.validation(state, base, config_auth, config_labels, reposlugs)
+    start.send_requests()
+    # print(state)
+    # print(delete_old)
+    # print(base)
+    # print(config_auth)
+    # print(config_labels)
+    # print(reposlugs)
 
 if __name__ == "__main__":
-    start = StartApp()
-    start.run()
+    command_line()
