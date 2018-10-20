@@ -30,7 +30,10 @@ class StartApp:
             with open(conf_file_name) as file:
                 config.read_file(file)
             for label in config['labels']:
-                self.labels.append(config['labels'][label])
+                labels = config['labels'][label].split('\n')
+                for l in labels:
+                    if l != "":
+                        self.labels.append((l, label))
         except TypeError:
             return None
         except FileNotFoundError:
@@ -53,13 +56,13 @@ class StartApp:
             print(r.json())
             print(r.status_code)
 
-    def send_request(self, url):
+    def send_get_request(self, url):
         session = requests.Session()
         session.headers = {'User-Agent': 'Python'}
         session.auth = self.token_auth
 
         r = session.get(url)
-        r.raise_for_status()
+        # r.raise_for_status()
         return r
 
     def validation(self, state, base, config_auth, config_labels, reposlugs):
@@ -96,20 +99,46 @@ class StartApp:
         # print(reposlugs)
 
     def verify_repo(self, repo):
-        r = self.send_request('https://api.github.com/repos/' + repo)
+        files_names = list()
+        current_labels = list()
+        # Test if repo exists
+        r = self.send_get_request('https://api.github.com/repos/' + repo)
         if r.status_code == 200:
-            print("OK")
-            r = self.send_request('https://api.github.com/repos/' + repo + "/pulls")
+            print("REPO " + repo + " - OK")
+            # Gets list of pull requests
+            r = self.send_get_request('https://api.github.com/repos/' + repo + "/pulls")
             if r.json() != "[]":
-                data = r.json()
-                for pull in data:
+                pulls = r.json()
+                for pull in pulls:
+                    print("  PR " + pull['url'] + " - OK")
+                    # Ensure right state
                     if pull['state'] == self.state:
-                        if self.base != "":
-                            pass
-                        else:
-                            pass
+                        for l in pull['labels']:
+                            current_labels.append(l['name'])
+                        # If the branch is set
+                        if self.base is not None:
+                            if pull['head']['ref'] == self.base:
+                                commit = pull['head']['sha']
+                                r = self.send_get_request('https://api.github.com/repos/' + repo + "/commits/" + commit)
+                                r_files = r.json()
+                                # Ensuring files
+                                for f in r_files:
+                                    files_names.append(f['files']['name'])
+                                    print(f['files']['name'])
+                                    # Comparing files with config file with labels
+
+                        else: # more branches - a branch is not set
+                            # Similar code like by IF branch !!!
+                            commit = pull['head']['sha']
+                            r = self.send_get_request('https://api.github.com/repos/' + repo + "/commits/" + commit)
+                            r_files = r.json()
+                            # Ensuring files
+                            for f in r_files['files']:
+                                files_names.append((f['filename'], f['status']))
+                                print((f['filename'], f['status']))
+                                # Comparing files with config file with labels
         else:
-            print("FAIL")
+            print("REPO " + repo + " - FAIL")
 
     def solve_repo(self, repo):
         self.verify_repo(repo)
