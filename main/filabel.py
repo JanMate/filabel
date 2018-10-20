@@ -9,6 +9,8 @@ class StartApp:
     def __init__(self):
         self.token = ""
         self.labels = list()
+        self.state = ""
+        self.base = ""
         self.reposlugs = list()
 
     def load_config(self, conf_file_name):
@@ -43,15 +45,29 @@ class StartApp:
         session.headers = {'User-Agent': 'Python'}
         session.auth = self.token_auth
         for repo in self.reposlugs:
-            r = session.get('https://api.github.com/repos/' + repo)
+            r = session.get('https://api.github.com/repos/' + repo + "/pulls")
+            r.raise_for_status()
+            pulls = r.json()
+            for pull in pulls:
+                print(pull['url'])
             print(r.json())
             print(r.status_code)
+
+    def send_request(self, url):
+        session = requests.Session()
+        session.headers = {'User-Agent': 'Python'}
+        session.auth = self.token_auth
+
+        r = session.get(url)
+        r.raise_for_status()
+        return r
 
     def validation(self, state, base, config_auth, config_labels, reposlugs):
         if not state in ['open', 'closed', 'all']:
             pass
-        if base:
-            pass
+        else:
+            self.state = state
+        self.base = base
         self.load_config(config_auth)
         if config_auth is None:
             print("Auth configuration not supplied!", file=sys.stderr)
@@ -79,6 +95,28 @@ class StartApp:
         #     print(label)
         # print(reposlugs)
 
+    def verify_repo(self, repo):
+        r = self.send_request('https://api.github.com/repos/' + repo)
+        if r.status_code == 200:
+            print("OK")
+            r = self.send_request('https://api.github.com/repos/' + repo + "/pulls")
+            if r.json() != "[]":
+                data = r.json()
+                for pull in data:
+                    if pull['state'] == self.state:
+                        if self.base != "":
+                            pass
+                        else:
+                            pass
+        else:
+            print("FAIL")
+
+    def solve_repo(self, repo):
+        self.verify_repo(repo)
+
+    def solve_repos(self):
+        for repo in self.reposlugs:
+            self.solve_repo(repo)
 
 @click.command()
 @click.option('-s', '--state', default='open', metavar='[open|closed|all]', help='Filter pulls by state.  [default: open]')
@@ -91,7 +129,7 @@ def command_line(state, delete_old, base, config_auth, config_labels, reposlugs)
     """CLI tool for filename-pattern-based labeling of GitHub PRs"""
     start = StartApp()
     start.validation(state, base, config_auth, config_labels, reposlugs)
-    start.send_requests()
+    start.solve_repos()
     # print(state)
     # print(delete_old)
     # print(base)
