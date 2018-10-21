@@ -11,6 +11,7 @@ class StartApp:
         self.labels = list()
         self.state = ""
         self.base = ""
+        self.delete_old = True
         self.reposlugs = list()
 
     def load_config(self, conf_file_name):
@@ -65,11 +66,21 @@ class StartApp:
         # r.raise_for_status()
         return r
 
-    def validation(self, state, base, config_auth, config_labels, reposlugs):
+    def send_post_request(self, url, data):
+        session = requests.Session()
+        session.headers = {'User-Agent': 'Python'}
+        session.auth = self.token_auth
+
+        r = session.post(url, data=data)
+        r.raise_for_status()
+        return r
+
+    def validation(self, state, delete_old, base, config_auth, config_labels, reposlugs):
         if not state in ['open', 'closed', 'all']:
             pass
         else:
             self.state = state
+        self.delete_old = delete_old
         self.base = base
         self.load_config(config_auth)
         if config_auth is None:
@@ -91,54 +102,104 @@ class StartApp:
                 print("Reposlug " + repo + " not valid!", file=sys.stderr)
                 exit(1)
             self.reposlugs.append(repo)
-        # print(state)
-        # print(base)
-        # print(token)
-        # for label in self.labels:
-        #     print(label)
-        # print(reposlugs)
+
+    def label_pull_request(self, pull, repo, current_labels, temp_files):
+        commit = pull['head']['sha']
+        r = self.send_get_request('https://api.github.com/repos/' + repo + "/commits/" + commit)
+        r_files = r.json()
+        # Ensuring files
+        for f in r_files['files']:
+            # print((f['filename'], f['status']))
+            # Comparing files with config file with labels
+            for lab in self.labels:
+                if fnmatch.fnmatch(f['filename'], lab[0]):
+                    if not current_labels.__contains__(lab[1]):
+                        current_labels.append(lab[1])
+                    temp_files.append((lab[1], f['status']))
+
+    def print_repo_ok(self, repo):
+        repo_out = "REPO"
+        repo_out = click.style(repo_out, bold=True)
+        status = "OK"
+        status = click.style(status, fg='green', bold=True)
+        print("{} ".format(repo_out) + repo + " - {}".format(status))
+
+    def print_pr_ok(self, pull):
+        pr_out = "PR"
+        pr_out = click.style(pr_out, bold=True)
+        status = "OK"
+        status = click.style(status, fg='green', bold=True)
+        print("  {} ".format(pr_out) + pull['url'] + " - {}".format(status))
+
+    def print_repo_fail(self, repo):
+        repo_out = "REPO"
+        repo_out = click.style(repo_out, bold=True)
+        fail_out = "FAIL"
+        fail_out = click.style(fail_out, bold=True, fg='red')
+        print("{} ".format(repo_out) + repo + " - {}".format(fail_out))
+
+    def print_pr_fail(self, pull):
+        pr_out = "PR"
+        pr_out = click.style(pr_out, bold=True)
+        fail_out = "FAIL"
+        fail_out = click.style(fail_out, bold=True, fg='red')
+        print("  {} ".format(pr_out) + pull['url'] + " - {}".format(fail_out))
+
+    def print_label(self, file):
+        if file[1] == "added":
+            string = "+ " + file[0]
+            string = click.style(string, fg='green')
+            print("    {}".format(string))
+        elif file[1] == "modified":
+            print("    = " + file[0])
+        else:
+            string = "- " + file[0]
+            string = click.style(string, fg='red')
+            print("    {}".format(string))
 
     def verify_repo(self, repo):
-        files_names = list()
-        current_labels = list()
         # Test if repo exists
         r = self.send_get_request('https://api.github.com/repos/' + repo)
         if r.status_code == 200:
-            print("REPO " + repo + " - OK")
+            self.print_repo_ok(repo)
             # Gets list of pull requests
             r = self.send_get_request('https://api.github.com/repos/' + repo + "/pulls")
             if r.json() != "[]":
                 pulls = r.json()
                 for pull in pulls:
-                    print("  PR " + pull['url'] + " - OK")
                     # Ensure right state
                     if pull['state'] == self.state:
+                        current_labels = list()
                         for l in pull['labels']:
                             current_labels.append(l['name'])
-                        # If the branch is set
-                        if self.base is not None:
-                            if pull['head']['ref'] == self.base:
-                                commit = pull['head']['sha']
-                                r = self.send_get_request('https://api.github.com/repos/' + repo + "/commits/" + commit)
-                                r_files = r.json()
-                                # Ensuring files
-                                for f in r_files:
-                                    files_names.append(f['files']['name'])
-                                    print(f['files']['name'])
-                                    # Comparing files with config file with labels
+                        temp_files = list()
+                        # If delete-old is set
+                        if self.delete_old:
+                            for l in self.labels:
+                                if current_labels.__contains__(l[1]):
+                                    current_labels.remove(l[1])
+                        else:
+                            # If the branch is set
+                            if self.base is not None:
+                                if pull['head']['ref'] == self.base:
+                                    self.label_pull_request(pull, repo, current_labels, temp_files)
+                                else:
+                                    self.print_pr_fail(pull)
+                                    return
+                            else: # more branches - a branch is not set
+                                self.label_pull_request(pull, repo, current_labels, temp_files)
 
-                        else: # more branches - a branch is not set
-                            # Similar code like by IF branch !!!
-                            commit = pull['head']['sha']
-                            r = self.send_get_request('https://api.github.com/repos/' + repo + "/commits/" + commit)
-                            r_files = r.json()
-                            # Ensuring files
-                            for f in r_files['files']:
-                                files_names.append((f['filename'], f['status']))
-                                print((f['filename'], f['status']))
-                                # Comparing files with config file with labels
+                        string = str(current_labels)
+                        string = string.replace("\'", "\"")
+                        r = self.send_post_request('https://api.github.com/repos/' + repo + "/issues/" + str(pull['number']), "{\"labels\":" + string + "}")
+                        if r.status_code == 200:
+                            self.print_pr_ok(pull)
+                            for file in temp_files:
+                                self.print_label(file)
+                        else:
+                            self.print_pr_fail(pull)
         else:
-            print("REPO " + repo + " - FAIL")
+            self.print_repo_fail(repo)
 
     def solve_repo(self, repo):
         self.verify_repo(repo)
@@ -149,7 +210,7 @@ class StartApp:
 
 @click.command()
 @click.option('-s', '--state', default='open', metavar='[open|closed|all]', help='Filter pulls by state.  [default: open]')
-@click.option('-d/-D', '--delete-old/--no-delete-old', metavar='', help='Delete labels that do not match anymore. [default: True]')
+@click.option('-d/-D', '--delete-old/--no-delete-old', default='True', metavar='', help='Delete labels that do not match anymore. [default: True]')
 @click.option('-b', '--base', metavar='BRANCH', help='Filter pulls by base (PR target) branch name.')
 @click.option('-a', '--config-auth', metavar='FILENAME', help='File with authorization configuration.')
 @click.option('-l', '--config-labels', metavar='FILENAME', help='File with labels configuration.')
@@ -157,7 +218,7 @@ class StartApp:
 def command_line(state, delete_old, base, config_auth, config_labels, reposlugs):
     """CLI tool for filename-pattern-based labeling of GitHub PRs"""
     start = StartApp()
-    start.validation(state, base, config_auth, config_labels, reposlugs)
+    start.validation(state, delete_old, base, config_auth, config_labels, reposlugs)
     start.solve_repos()
     # print(state)
     # print(delete_old)
